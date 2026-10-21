@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SecureoT | Process</title>
+<link rel="icon" href="images/secureot-icon.png">
+<!-- Fonts are bundled in /fonts so they show on any computer, online or offline -->
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+:root {
+  --teal: #0F2A2A;
+  --teal-2: #1C3838;
+  --lime: #C5ED47;
+  --bg: #E2F2A4;          /* the brand neon, softened so it's easy on the eyes */
+  --ink: #0F2A2A;
+  --ink-2: #3C5352;
+  --white: #FFFFFF;
+  --f-body: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  --f-display: "Oxanium", "IBM Plex Sans", "Segoe UI", sans-serif;
+  --ease: cubic-bezier(.2, .7, .1, 1);
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- Stage: a fixed 1280x720 canvas scaled to fit any screen ---------- */
+.viewport {
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(1200px 700px at 20% 10%, rgba(255,255,255,.45), transparent 60%),
+    linear-gradient(rgba(15,42,42,.055) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgba(15,42,42,.055) 1px, transparent 1px) 0 0 / 40px 40px,
+    var(--bg);
+}
+.canvas {
+  position: absolute; left: 50%; top: 50%;
+  width: 1280px; height: 720px;
+  transform: translate(-50%, -50%) scale(var(--k, 1));
+  transform-origin: center center;
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  position: absolute; top: 28px; left: 120px; right: 120px;
+  display: flex; align-items: center; justify-content: space-between;
+  z-index: 5;
+}
+.brand-pill {
+  background: var(--white); border-radius: 999px;
+  padding: 8px 16px; display: flex; align-items: center;
+  box-shadow: 0 6px 16px -10px rgba(15,42,42,.5);
+}
+.brand-pill img { height: 18px; display: block; }
+.counter { font: 600 14px var(--f-display); letter-spacing: .12em; color: var(--ink-2); }
+.counter b { color: var(--ink); }
+
+/* ---------- Bottom progress ("scan") ---------- */
+.progress {
+  position: absolute; bottom: 30px; left: 120px; right: 120px;
+  display: flex; align-items: center; gap: 16px; z-index: 5;
+}
+.progress__track { flex: 1; height: 6px; background: rgba(15,42,42,.14); border-radius: 6px; overflow: hidden; }
+.progress__fill { height: 100%; width: 0; background: var(--teal); border-radius: 6px; transition: width .6s var(--ease); }
+.progress__label { font: 600 13px var(--f-display); letter-spacing: .14em; min-width: 104px; }
+.progress__label i { font-style: normal; display: inline-block; width: 8px; height: 8px; background: var(--teal); margin-right: 8px; }
+
+/* ---------- Arrows ---------- */
+.nav {
+  position: absolute; top: 50%; z-index: 6;
+  width: 64px; height: 64px; margin-top: -32px;
+  border: 0; border-radius: 50%;
+  background: var(--teal); color: var(--lime);
+  display: grid; place-items: center;
+  box-shadow: 0 12px 24px -12px rgba(15,42,42,.7);
+  transition: transform .2s var(--ease), opacity .2s, background .2s;
+}
+.nav svg { width: 28px; height: 28px; }
+.nav:hover { transform: scale(1.08); background: var(--teal-2); }
+.nav:focus-visible { outline: 3px solid var(--teal); outline-offset: 4px; }
+.nav[disabled] { opacity: .18; cursor: default; transform: none; }
+.nav--next { right: 28px; }
+.nav--prev { left: 28px; }
+/* after a few idle seconds, the next arrow pings to show it's clickable */
+.nav--next.is-nudging { animation: nudge 3s ease-in-out infinite; }
+.nav--next.is-nudging::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 1.5px solid var(--teal); animation: ping 3s ease-out infinite;
+}
+@keyframes nudge { 0%, 40%, 100% { transform: translateX(0); } 20% { transform: translateX(3px); } }
+@keyframes ping { 0% { transform: scale(1); opacity: .4; } 45%, 100% { transform: scale(1.35); opacity: 0; } }
+
+/* ---------- Slides ---------- */
+.slide {
+  position: absolute; inset: 0;
+  padding: 104px 128px 92px;
+  display: grid; grid-template-columns: 340px 1fr; gap: 48px; align-items: center;
+  opacity: 0; visibility: hidden;
+  transform: translateX(36px);
+  transition: opacity .5s var(--ease), transform .6s var(--ease), visibility 0s .6s;
+}
+.slide.is-active { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.slide.is-past { transform: translateX(-36px); }
+
+.kicker {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--teal); color: var(--lime);
+  font: 600 13px var(--f-display); letter-spacing: .16em;
+  padding: 7px 12px 6px; border-radius: 4px; margin-bottom: 20px;
+}
+.kicker::before { content: ""; width: 8px; height: 8px; background: var(--lime); }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+h2 { font-size: 42px; margin-bottom: 18px; }
+.lead { font-size: 18.5px; line-height: 1.6; color: var(--ink-2); }
+.lead + .lead { margin-top: 12px; }
+.lead strong { color: var(--ink); font-weight: 600; }
+/* tool tags: one style everywhere */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.chip {
+  font: 600 13px var(--f-display); letter-spacing: .06em;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1.5px solid var(--teal); background: rgba(255,255,255,.35);
+}
+
+/* ---------- Image frames (chunky white border, opens full size) ---------- */
+.shot {
+  position: relative; display: block;
+  border: 0; padding: 7px 7px 0; border-radius: 10px;
+  background: var(--white);
+  box-shadow: 0 1px 0 rgba(15,42,42,.06), 0 14px 28px -14px rgba(15,42,42,.55);
+  transform: rotate(var(--r, 0deg));
+  transition: transform .25s var(--ease), box-shadow .25s;
+  cursor: zoom-in; text-align: center;
+}
+.shot img {
+  display: block; width: var(--w, 160px); height: var(--h, 110px);
+  object-fit: cover; object-position: top center;
+  border-radius: 5px; background: #EEF3EF;
+}
+.shot .cap { display: block; padding: 7px 4px 8px; font: 600 12px var(--f-display); letter-spacing: .06em; color: var(--ink); }
+.shot:not(:has(.cap)) { padding-bottom: 7px; }
+.shot:hover { transform: translateY(-5px) rotate(0deg) scale(1.02); box-shadow: 0 1px 0 rgba(15,42,42,.06), 0 22px 34px -16px rgba(15,42,42,.6); z-index: 2; }
+.shot:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
+.shot::after { /* little scanner corner on hover */
+  content: ""; position: absolute; top: 14px; left: 14px; width: 16px; height: 16px;
+  border-top: 3px solid var(--lime); border-left: 3px solid var(--lime);
+  opacity: 0; transition: opacity .2s;
+  filter: drop-shadow(0 0 2px rgba(15,42,42,.6));
+}
+.shot:hover::after { opacity: 1; }
+/* image not in the folder yet */
+.shot.is-missing { cursor: default; }
+.shot.is-missing img { visibility: hidden; }
+.shot.is-missing::before {
+  content: attr(data-name); position: absolute; inset: 7px 7px auto; height: var(--h);
+  display: grid; place-items: center; border-radius: 5px;
+  border: 2px dashed rgba(15,42,42,.25); color: var(--ink-2);
+  font: 600 13px var(--f-display); letter-spacing: .08em;
+}
+
+.visual { position: relative; display: flex; align-items: center; justify-content: center; height: 100%; }
+
+/* ---------- Cover ---------- */
+.cover { grid-template-columns: 1fr; text-align: center; justify-items: center; align-content: center; gap: 0; }
+.cover .eyebrow { font: 600 14px var(--f-display); letter-spacing: .24em; color: var(--ink-2); margin-bottom: 32px; }
+.logo-card {
+  position: relative; background: var(--white); border-radius: 18px;
+  padding: 34px 48px; box-shadow: 0 24px 50px -26px rgba(15,42,42,.6);
+}
+.logo-card img { display: block; width: 440px; }
+.cover .lead { margin-top: 48px; font: 500 30px/1.35 var(--f-display); color: var(--ink); }
+
+/* scanner corners around a card */
+.scan-corners { position: absolute; inset: -14px; pointer-events: none; }
+.scan-corners i { position: absolute; width: 24px; height: 24px; border: 3px solid var(--teal); }
+.scan-corners i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.scan-corners i:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.scan-corners i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.scan-corners i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+.is-active .scan-corners { animation: lock 1.1s var(--ease) both .2s; }
+@keyframes lock { from { inset: -48px; opacity: 0; } to { inset: -14px; opacity: 1; } }
+
+/* ---------- Research ---------- */
+.grid-2x2 { display: grid; grid-template-columns: repeat(2, auto); gap: 22px 26px; }
+.grid-2x2 .shot { --w: 250px; --h: 180px; }
+
+/* ---------- Moodboard ---------- */
+.board { display: flex; flex-direction: column; gap: 22px; }
+.board__row { display: flex; gap: 12px; align-items: flex-end; }
+.board__label { font: 600 12px var(--f-display); letter-spacing: .16em; color: var(--ink-2); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.board__label::before { content: ""; width: 8px; height: 8px; background: var(--teal); }
+.board .pin .shot { --w: 80px; --h: 108px; }
+.board .gpt .shot { --w: 130px; --h: 88px; }
+
+/* ---------- Palette ---------- */
+.palette { display: flex; gap: 18px; align-items: stretch; }
+.swatch {
+  width: 170px; height: 260px; border: 0; border-radius: 14px; padding: 0;
+  display: flex; flex-direction: column; justify-content: flex-end; text-align: left;
+  box-shadow: 0 18px 34px -20px rgba(15,42,42,.7);
+  outline: 7px solid var(--white); outline-offset: -1px;
+  transition: transform .25s var(--ease);
+}
+.swatch:hover { transform: translateY(-6px); }
+.swatch span { display: block; padding: 0 16px; }
+.swatch .name { font: 600 13px var(--f-display); letter-spacing: .1em; margin-bottom: 4px; }
+.swatch .hex { font: 700 24px var(--f-display); margin-bottom: 18px; }
+.swatch--teal { background: var(--teal); color: var(--white); }
+.swatch--teal .name { color: var(--lime); }
+.swatch--lime { background: var(--lime); color: var(--teal); }
+.swatch .copied { font: 600 12px var(--f-body); opacity: 0; transition: opacity .2s; margin-bottom: 14px; }
+.swatch.did-copy .copied { opacity: 1; }
+.palette .shot { --w: 168px; --h: 170px; --r: 2deg; align-self: center; margin-left: 8px; }
+.palette .shot img { object-position: top right; }
+
+/* ---------- Element ---------- */
+.feature .shot { --w: 560px; --h: 373px; --r: -1.2deg; }
+.badge {
+  position: absolute; top: 18px; left: 2px; z-index: 3;
+  background: var(--teal); color: var(--lime);
+  font: 600 13px var(--f-display); letter-spacing: .1em;
+  padding: 8px 14px; border-radius: 6px; transform: rotate(-3deg);
+  box-shadow: 0 10px 18px -10px rgba(15,42,42,.8);
+}
+
+/* ---------- Logo ---------- */
+.logo-stage { display: flex; flex-direction: column; align-items: center; gap: 30px; }
+.logo-stage .logo-card { padding: 40px 50px; overflow: hidden; }
+.logo-stage .logo-card img { width: 500px; }
+.sweep {
+  position: absolute; top: 0; bottom: 0; width: 3px; left: 0;
+  background: var(--lime); box-shadow: 0 0 18px 4px rgba(197,237,71,.8);
+  opacity: 0;
+}
+.is-active .sweep { animation: sweep 2.6s var(--ease) .5s both; }
+@keyframes sweep { 0% { left: 2%; opacity: 0; } 10% { opacity: 1; } 85% { opacity: 1; } 100% { left: 96%; opacity: 0; } }
+.marks { display: flex; gap: 18px; }
+.mark {
+  background: var(--white); border-radius: 12px; padding: 14px 16px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  box-shadow: 0 12px 24px -16px rgba(15,42,42,.6);
+}
+.mark img { height: 64px; display: block; }
+.mark span { font-size: 13px; color: var(--ink-2); }
+.mark--font b { display: grid; place-items: center; height: 64px; font: 600 50px/1 var(--f-display); color: var(--teal); }
+
+/* ---------- Content: chat ---------- */
+.chat { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 18px; }
+.bubble {
+  align-self: flex-start;
+  background: var(--white); border-radius: 18px 18px 18px 4px;
+  padding: 18px 22px; font-size: 16.5px; line-height: 1.65;
+  box-shadow: 0 14px 30px -18px rgba(15,42,42,.6);
+  min-height: 178px; position: relative;
+}
+.bubble__who { font: 600 12px var(--f-display); letter-spacing: .14em; color: var(--ink-2); margin-bottom: 8px; display: block; }
+.caret { display: inline-block; width: 2px; height: 1.05em; background: var(--teal); vertical-align: -3px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+/* site sections, not tool tags: solid so they read as the site's structure */
+.sitemap { display: flex; flex-wrap: wrap; gap: 8px; }
+.sitemap span { background: var(--teal); color: var(--white); border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 500; }
+.sitemap b { color: var(--lime); font: 600 12px var(--f-display); margin-right: 6px; }
+.after { font-weight: 600; font-size: 16.5px; display: flex; align-items: center; gap: 10px; }
+.after::before { content: ""; width: 26px; height: 2px; background: var(--teal); }
+
+/* ---------- Interactions ---------- */
+.ix { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; width: 100%; }
+.ix-card {
+  background: var(--white); border-radius: 14px; padding: 20px 20px 18px;
+  box-shadow: 0 14px 28px -20px rgba(15,42,42,.6);
+  display: grid; grid-template-columns: 64px 1fr; gap: 16px; align-items: center;
+}
+.ix-card h3 { font-size: 18px; margin-bottom: 4px; }
+.ix-card p { font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.ix-ico { width: 64px; height: 64px; border-radius: 10px; background: var(--teal); position: relative; overflow: hidden; }
+/* tiny looping demos */
+.ico-scan::before { content: ""; position: absolute; top: 10px; bottom: 10px; width: 2px; background: var(--lime); box-shadow: 0 0 8px var(--lime); animation: icoScan 2.2s ease-in-out infinite alternate; }
+.ico-scan::after { content: ""; position: absolute; inset: 14px; border: 2px dashed rgba(197,237,71,.35); }
+@keyframes icoScan { from { left: 12px; } to { left: 50px; } }
+.ico-reveal i { position: absolute; left: 14px; right: 14px; height: 6px; border-radius: 2px; background: var(--lime); animation: icoUp 2.4s var(--ease) infinite; opacity: 0; }
+.ico-reveal i:nth-child(1) { top: 16px; } .ico-reveal i:nth-child(2) { top: 29px; right: 24px; animation-delay: .2s; } .ico-reveal i:nth-child(3) { top: 42px; right: 32px; animation-delay: .4s; }
+@keyframes icoUp { 0% { opacity: 0; transform: translateY(8px); } 25%, 75% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+.ico-steps i { position: absolute; top: 28px; width: 8px; height: 8px; border: 2px solid var(--lime); animation: icoStep 2.4s steps(1) infinite; }
+.ico-steps i:nth-child(1) { left: 12px; } .ico-steps i:nth-child(2) { left: 28px; animation-delay: .8s; } .ico-steps i:nth-child(3) { left: 44px; animation-delay: 1.6s; }
+@keyframes icoStep { 0% { background: var(--lime); } 33% { background: transparent; } }
+.ico-grid { background-image: linear-gradient(rgba(197,237,71,.22) 1px, transparent 1px), linear-gradient(90deg, rgba(197,237,71,.22) 1px, transparent 1px); background-size: 12px 12px; }
+.ico-grid::before { content: ""; position: absolute; width: 12px; height: 12px; background: var(--lime); animation: icoHop 3s steps(1) infinite; }
+@keyframes icoHop { 0% { top: 12px; left: 12px; } 25% { top: 24px; left: 36px; } 50% { top: 36px; left: 24px; } 75% { top: 12px; left: 48px; } }
+
+/* ---------- Build: terminal ---------- */
+.term {
+  width: 100%; max-width: 660px;
+  background: var(--teal); color: #DDE7E5; border-radius: 14px;
+  box-shadow: 0 26px 50px -24px rgba(15,42,42,.9);
+  outline: 7px solid var(--white);
+  overflow: hidden;
+}
+.term__bar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; background: var(--teal-2); }
+.term__bar i { width: 11px; height: 11px; border-radius: 50%; background: rgba(255,255,255,.18); }
+.term__bar i:first-child { background: var(--lime); }
+.term__bar span { margin-left: 10px; font: 500 12px var(--f-display); letter-spacing: .1em; color: rgba(255,255,255,.55); }
+.term pre {
+  margin: 0; padding: 20px 24px 24px; min-height: 318px;
+  font: 500 15px/1.75 ui-monospace, "Cascadia Code", Consolas, monospace;
+  white-space: pre-wrap;
+}
+.term .k { color: var(--lime); }
+.term .d { color: rgba(221,231,229,.55); }
+
+/* ---------- Versions ---------- */
+.versions { display: flex; flex-direction: column; gap: 26px; align-items: center; }
+.film { display: flex; }
+.film .shot { --w: 124px; --h: 80px; margin-left: -14px; }
+.film .shot:first-child { margin-left: 0; }
+.film .shot:nth-child(odd) { --r: -2deg; } .film .shot:nth-child(even) { --r: 2deg; transform: rotate(var(--r)) translateY(10px); }
+.film .shot:hover { z-index: 3; }
+.devices { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.devices__label { font-size: 15px; color: var(--ink-2); }
+.devices__row { display: flex; gap: 14px; }
+.devices .shot { --w: 168px; --h: 95px; }
+.devices .shot img { object-position: center; }
+
+/* ---------- Mobile ---------- */
+.phones { display: flex; gap: 26px; align-items: center; }
+.phones .shot { --w: 150px; --h: 310px; border-radius: 22px; padding: 7px; }
+.phones .shot img { border-radius: 16px; }
+.phones .shot:nth-child(1) { --r: -3deg; } .phones .shot:nth-child(2) { transform: translateY(-14px); } .phones .shot:nth-child(3) { --r: 3deg; }
+.phones .shot.is-missing::before { border-radius: 16px; }
+
+/* ---------- Final ---------- */
+.final { grid-template-columns: 1fr; text-align: center; justify-items: center; align-content: center; gap: 0; }
+.final h2 { font-size: 50px; margin: 0 0 36px; }
+.final .logo-card { padding: 26px 38px; }
+.final .logo-card img { width: 340px; }
+.final__actions { margin-top: 40px; display: flex; gap: 14px; align-items: center; }
+.visit {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--teal); color: var(--lime); text-decoration: none;
+  border-radius: 999px; padding: 13px 24px; font-weight: 600; font-size: 16px;
+  box-shadow: 0 14px 26px -14px rgba(15,42,42,.8);
+  transition: transform .2s var(--ease);
+}
+.visit:hover { transform: translateY(-2px); }
+.visit:focus-visible, .restart:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
+.restart {
+  border: 1.5px solid var(--teal); background: transparent;
+  border-radius: 999px; padding: 11.5px 20px; font-weight: 600; font-size: 15px;
+  transition: background .2s, color .2s;
+}
+.restart:hover { background: var(--teal); color: var(--lime); }
+
+/* ---------- Lightbox ---------- */
+.lb {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(10, 28, 28, .86); backdrop-filter: blur(6px);
+  display: grid; place-items: center; padding: 56px 20px 24px;
+  opacity: 0; visibility: hidden; transition: opacity .25s, visibility 0s .25s;
+}
+.lb.is-open { opacity: 1; visibility: visible; transition-delay: 0s; }
+.lb figure { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 100%; max-height: 100%; }
+.lb img {
+  display: block; max-width: min(1400px, 94vw); max-height: calc(100dvh - 120px);
+  object-fit: contain; background: var(--white);
+  border: 10px solid var(--white); border-radius: 12px;
+  box-shadow: 0 30px 60px -20px rgba(0,0,0,.6);
+  transform: scale(.96); transition: transform .3s var(--ease);
+}
+.lb.is-open img { transform: none; }
+.lb figcaption { color: var(--white); font: 600 14px var(--f-display); letter-spacing: .1em; }
+.lb__x {
+  position: absolute; top: 14px; right: 14px;
+  width: 46px; height: 46px; border-radius: 50%; border: 0;
+  background: var(--lime); color: var(--teal);
+  display: grid; place-items: center;
+}
+.lb__x svg { width: 20px; height: 20px; }
+.lb__x:hover { transform: scale(1.08); }
+
+/* ---------- Phone in portrait: ask to rotate ---------- */
+.rotate {
+  position: fixed; inset: 0; z-index: 60; display: none;
+  background: var(--teal); color: var(--white);
+  flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  text-align: center; padding: 32px;
+}
+.rotate svg { width: 84px; height: 84px; color: var(--lime); animation: tilt 2.2s var(--ease) infinite; }
+@keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(90deg); } }
+.rotate p { font: 600 20px var(--f-display); }
+.rotate small { color: rgba(255,255,255,.7); font-size: 15px; }
+.rotate button { margin-top: 8px; border: 1.5px solid var(--lime); color: var(--lime); background: transparent; border-radius: 999px; padding: 10px 18px; }
+@media (orientation: portrait) and (max-width: 820px) {
+  body:not(.ignore-rotate) .rotate { display: flex; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="viewport">
+  <main class="canvas" id="canvas">
+
+    <header class="topbar">
+      <div class="brand-pill"><img src="images/secureot-logo.png" alt="SecureoT"></div>
+      <div class="counter"><b id="cur">01</b> / <span id="tot">12</span></div>
+    </header>
+
+    <!-- Cover -->
+    <section class="slide cover" aria-label="Cover">
+      <p class="eyebrow">EDEN NISUYEVE | WORK PROCESS</p>
+      <div class="logo-card">
+        <div class="scan-corners"><i></i><i></i><i></i><i></i></div>
+        <img src="images/secureot-logo.png" alt="SecureoT">
+      </div>
+      <h1 class="lead">My work process for the SecureoT website,<br>step by step.</h1>
+    </section>
+
+    <!-- 01 · Research -->
+    <section class="slide" aria-label="Research">
+      <div>
+        <span class="kicker">01 · RESEARCH</span>
+        <h2>Getting to know the field</h2>
+        <p class="lead">I like to start by looking at companies doing similar work, to understand the industry and the kind of content it calls for.</p>
+        <p class="lead">I asked ChatGPT and Claude for relevant cybersecurity companies, then went through their homepages.</p>
+        <div class="chips"><span class="chip">ChatGPT</span><span class="chip">Claude</span></div>
+      </div>
+      <div class="visual">
+        <div class="grid-2x2">
+          <button class="shot" style="--r:-1.5deg" data-full="images/SimilarField_Armis.png"><img src="images/thumbs/SimilarField_Armis.jpg" alt="Armis homepage"><span class="cap">ARMIS</span></button>
+          <button class="shot" style="--r:1.2deg" data-full="images/SimilarField_Sternum.png"><img src="images/thumbs/SimilarField_Sternum.jpg" alt="Sternum homepage"><span class="cap">STERNUM</span></button>
+          <button class="shot" style="--r:1deg" data-full="images/SimilarField_Onekey.png"><img src="images/thumbs/SimilarField_Onekey.jpg" alt="ONEKEY homepage"><span class="cap">ONEKEY</span></button>
+          <button class="shot" style="--r:-1deg" data-full="images/SimilarField_FiniteState.png"><img src="images/thumbs/SimilarField_FiniteState.jpg" alt="Finite State homepage"><span class="cap">FINITE STATE</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 · Moodboard -->
+    <section class="slide" aria-label="Inspiration">
+      <div>
+        <span class="kicker">02 · INSPIRATION</span>
+        <h2>Moodboard (and lots of open tabs)</h2>
+        <p class="lead">I gathered references for <strong>the logo, the colors and a graphic element that makes the brand unique</strong>, from Pinterest and ChatGPT.</p>
+        <div class="chips"><span class="chip">Pinterest</span><span class="chip">ChatGPT</span></div>
+      </div>
+      <div class="visual">
+        <div class="board">
+          <div class="pin">
+            <div class="board__label">PINTEREST</div>
+            <div class="board__row">
+              <button class="shot" style="--r:-2deg" data-full="images/PinterestInspo1.png"><img src="images/thumbs/PinterestInspo1.jpg" alt="Pinterest inspiration 1"></button>
+              <button class="shot" style="--r:1.5deg" data-full="images/PinterestInspo2.png"><img src="images/thumbs/PinterestInspo2.jpg" alt="Pinterest inspiration 2"></button>
+              <button class="shot" style="--r:-1deg" data-full="images/PinterestInspo3.png"><img src="images/thumbs/PinterestInspo3.jpg" alt="Pinterest inspiration 3"></button>
+              <button class="shot" style="--r:2deg" data-full="images/PinterestInspo4.png"><img src="images/thumbs/PinterestInspo4.jpg" alt="Pinterest inspiration 4"></button>
+              <button class="shot" style="--r:-1.5deg" data-full="images/PinterestInspo5.png"><img src="images/thumbs/PinterestInspo5.jpg" alt="Pinterest inspiration 5"></button>
+              <button class="shot" style="--r:1deg" data-full="images/PinterestInspo6.png"><img src="images/thumbs/PinterestInspo6.jpg" alt="Pinterest inspiration 6"></button>
+            </div>
+          </div>
+          <div class="gpt">
+            <div class="board__label">CHATGPT</div>
+            <div class="board__row">
+              <button class="shot" style="--r:1.5deg" data-full="images/ChatGPTInspo1.png"><img src="images/thumbs/ChatGPTInspo1.jpg" alt="ChatGPT inspiration 1"></button>
+              <button class="shot" style="--r:-1.5deg" data-full="images/ChatGPTInspo2.png"><img src="images/thumbs/ChatGPTInspo2.jpg" alt="ChatGPT inspiration 2"></button>
+              <button class="shot" style="--r:1deg" data-full="images/ChatGPTInspo3.png"><img src="images/thumbs/ChatGPTInspo3.jpg" alt="ChatGPT inspiration 3"></button>
+              <button class="shot" style="--r:-2deg" data-full="images/ChatGPTInspo4.png"><img src="images/thumbs/ChatGPTInspo4.jpg" alt="ChatGPT inspiration 4"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 · Palette -->
+    <section class="slide" aria-label="Color palette">
+      <div>
+        <span class="kicker">03 · COLOR</span>
+        <h2>Choosing the Right Colors</h2>
+        <p class="lead">Many cybersecurity brands lean on blue or neon purple. I wanted something different that still communicates <strong>technology and trust</strong>, without feeling too gaming-inspired.</p>
+        <p class="lead">Deep teal brings stability, signal green highlights key elements, and white keeps the design clean and balanced.</p>
+        <div class="chips"><span class="chip">Pinterest</span><span class="chip">ChatGPT</span></div>
+      </div>
+      <div class="visual">
+        <div class="palette">
+          <button class="swatch swatch--teal" data-hex="#0F2A2A"><span class="copied">Copied ✓</span><span class="name">DEEP TEAL</span><span class="hex">#0F2A2A</span></button>
+          <button class="swatch swatch--lime" data-hex="#C5ED47"><span class="copied">Copied ✓</span><span class="name">SIGNAL GREEN</span><span class="hex">#C5ED47</span></button>          <button class="shot" data-full="images/ChatGPTInspo5.png"><img src="images/thumbs/ChatGPTInspo5.jpg" alt="Palettes I explored with ChatGPT"><span class="cap">PALETTES I EXPLORED<br>WITH CHATGPT</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 · The element -->
+    <section class="slide" aria-label="The visual element">
+      <div>
+        <span class="kicker">04 · THE ELEMENT</span>
+        <h2>Inspired by Scanning</h2>
+        <p class="lead">I explored different visual elements that could represent SecureoT and what the company does.</p>
+        <p class="lead">After reviewing several ideas, I liked the <strong>scanner concept</strong> the most. It represents the process of detecting potential risks.</p>
+        <div class="chips"><span class="chip">ChatGPT</span></div>
+      </div>
+      <div class="visual feature">
+        <span class="badge">THE WINNING INSPIRATION</span>
+        <button class="shot" data-full="images/ChatGPT_FinalInspo.png"><img src="images/thumbs/ChatGPT_FinalInspo.jpg" alt="Final inspiration from ChatGPT"></button>
+      </div>
+    </section>
+
+    <!-- 05 · Logo -->
+    <section class="slide" aria-label="Logo">
+      <div>
+        <span class="kicker">05 · LOGO</span>
+        <h2>From Idea to Logo</h2>
+        <p class="lead">I chose Oxanium, a clean and professional font, for the logo.</p>
+        <p class="lead">I decided to use the <strong>final T</strong> in SecureoT and combine it with a small scanning element.</p>
+        <p class="lead">I wanted the logo to be <strong>clean and simple</strong>, with an element I could also use across the website.</p>
+        <div class="chips"><span class="chip">Figma</span></div>
+      </div>
+      <div class="visual">
+        <div class="logo-stage">
+          <div class="logo-card">
+            <span class="sweep"></span>
+            <img src="images/secureot-logo.png" alt="Final SecureoT logo">
+          </div>
+          <div class="marks">
+            <div class="mark mark--font"><b>Aa</b><span>Oxanium</span></div>
+            <div class="mark"><img src="images/secureot-icon.png" alt=""><span>Icon</span></div>
+            <div class="mark"><img src="images/secureot-icon-bracket.png" alt=""><span>Scanner icon for the visual language</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 · Content -->
+    <section class="slide" aria-label="Content">
+      <div>
+        <span class="kicker">06 · CONTENT</span>
+        <h2>So what goes on the site?</h2>
+        <p class="lead">I won't go through every prompt I used, but I wanted to make sure the homepage clearly explains <strong>what SecureoT does and why it matters.</strong></p>
+        <p class="lead">It went something like this...</p>
+        <div class="chips"><span class="chip">ChatGPT</span></div>
+      </div>
+      <div class="visual">
+        <div class="chat">
+          <div class="bubble">
+            <span class="bubble__who">ME → CHATGPT</span>
+            <span class="typer" data-speed="14">I'm building a website for SecureoT, a cybersecurity company that detects risks in connected devices like smartwatches, drones, and smartphones. Help me plan the homepage sections, including their order and key messages. I want the website to clearly explain what SecureoT does and why it matters, even to people who aren't familiar with cybersecurity. Keep the content simple, clear, and professional...</span>
+          </div>
+          <p class="after">After a short back-and-forth, we landed on the content:</p>
+          <div class="sitemap">
+            <span><b>01</b>Hero</span>
+            <span><b>02</b>Partners</span>
+            <span><b>03</b>The Problem</span>
+            <span><b>04</b>Our Approach</span>
+            <span><b>05</b>How It Works</span>
+            <span><b>06</b>Devices</span>
+            <span><b>07</b>The Platform</span>
+            <span><b>08</b>Connect With Us</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 · Interactions -->
+    <section class="slide" aria-label="Interactions">
+      <div>
+        <span class="kicker">07 · INTERACTION</span>
+        <h2>How do you keep people scrolling?</h2>
+        <p class="lead">I went back to the sites from my research and explored a few more, this time <strong>focusing on motion.</strong></p>
+        <p class="lead">I wanted the site to spark curiosity, so every scroll reveals something new.</p>
+      </div>
+      <div class="visual">
+        <div class="ix">
+          <div class="ix-card"><div class="ix-ico ico-scan"></div><div><h3>Live Scanner</h3><p>An interactive scanner brings the logo concept to life on the first screen.</p></div></div>
+          <div class="ix-card"><div class="ix-ico ico-reveal"><i></i><i></i><i></i></div><div><h3>Scroll reveals</h3><p>Content enters gradually, so there's always something to discover.</p></div></div>
+          <div class="ix-card"><div class="ix-ico ico-steps"><i></i><i></i><i></i></div><div><h3>Step by step</h3><p>"How it works" advances with scrolling or swiping.</p></div></div>
+          <div class="ix-card"><div class="ix-ico ico-grid"></div><div><h3>Responsive grid</h3><p>In the contact section, the grid reacts to the cursor.</p></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 08 · Claude Code -->
+    <section class="slide" aria-label="Building with Claude Code">
+      <div>
+        <span class="kicker">08 · BUILD</span>
+        <h2>The fun part: building it</h2>
+        <p class="lead">I used ChatGPT to help me write a detailed prompt for Claude Code, <strong>including my logo, colors, visual elements, and the interactions I wanted.</strong></p>
+        <p class="lead">I also <strong>left room for creativity</strong>, while keeping the design professional, modern, and true to the cyber world, with a responsive layout for <strong>desktop and mobile.</strong></p>
+        <div class="chips"><span class="chip">ChatGPT</span><span class="chip">Claude Code</span></div>
+      </div>
+      <div class="visual">
+        <div class="term">
+          <div class="term__bar"><i></i><i></i><i></i><span>CLAUDE CODE</span></div>
+          <pre class="typer-term"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 09 · Iterations -->
+    <section class="slide" aria-label="Iterations">
+      <div>
+        <span class="kicker">09 · VERSIONS</span>
+        <h2>A Few Versions Later...</h2>
+        <p class="lead">Claude and I went through several rounds, <strong>refining the content, design and interactions</strong> each time until the result felt right.</p>
+        <div class="chips"><span class="chip">Claude Code</span><span class="chip">ChatGPT</span></div>
+      </div>
+      <div class="visual">
+        <div class="versions">
+          <div class="film">
+            <button class="shot" data-full="images/ClaudeVersion1.png"><img src="images/thumbs/ClaudeVersion1.jpg" alt="Version 1"><span class="cap">V1</span></button>
+            <button class="shot" data-full="images/ClaudeVersion2.png"><img src="images/thumbs/ClaudeVersion2.jpg" alt="Version 2"><span class="cap">V2</span></button>
+            <button class="shot" data-full="images/ClaudeVersion3.png"><img src="images/thumbs/ClaudeVersion3.jpg" alt="Version 3"><span class="cap">V3</span></button>
+            <button class="shot" data-full="images/ClaudeVersion4.png"><img src="images/thumbs/ClaudeVersion4.jpg" alt="Version 4"><span class="cap">V4</span></button>
+            <button class="shot" data-full="images/ClaudeVersion5.png"><img src="images/thumbs/ClaudeVersion5.jpg" alt="Version 5"><span class="cap">V5</span></button>
+          </div>
+          <div class="devices">
+            <p class="devices__label">I also generated the device images for the site with ChatGPT.</p>
+            <div class="devices__row">
+              <button class="shot" style="--r:-1.5deg" data-full="images/Device1.png"><img src="images/thumbs/Device1.jpg" alt="Device image 1"></button>
+              <button class="shot" style="--r:1deg" data-full="images/Device2.png"><img src="images/thumbs/Device2.jpg" alt="Device image 2"></button>
+              <button class="shot" style="--r:-1deg" data-full="images/Device3.png"><img src="images/thumbs/Device3.jpg" alt="Device image 3"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 · Mobile -->
+    <section class="slide" aria-label="Mobile">
+      <div>
+        <span class="kicker">10 · MOBILE</span>
+        <h2>And What About Mobile?</h2>
+        <p class="lead">Of course, the website had to <strong>look good and feel just as smooth on mobile, too.</strong></p>
+        <p class="lead">So I tested and adjusted the mobile version along the way to make sure everything worked well.</p>
+      </div>
+      <div class="visual">
+        <div class="phones">
+          <button class="shot" data-src="images/phone1" data-name="PHONE1"><img alt="Mobile view 1"></button>
+          <button class="shot" data-src="images/phone2" data-name="PHONE2"><img alt="Mobile view 2"></button>
+          <button class="shot" data-src="images/phone3" data-name="PHONE3"><img alt="Mobile view 3"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 · Done -->
+    <section class="slide final" aria-label="Done">
+      <span class="kicker">DONE</span>
+      <h2>And that's it. The site is ready.</h2>
+      <div class="logo-card">
+        <div class="scan-corners"><i></i><i></i><i></i><i></i></div>
+        <img src="images/secureot-logo.png" alt="SecureoT">
+      </div>
+      <div class="final__actions">
+        <a class="visit" href="https://edennisuyeve.github.io/SecureoT/" target="_blank" rel="noopener">Visit the website ↗</a>
+        <button class="restart" id="restart">↺ Back to start</button>
+      </div>
+    </section>
+
+    <button class="nav nav--prev" id="prev" aria-label="Previous slide">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <button class="nav nav--next" id="next" aria-label="Next slide">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+
+    <footer class="progress" aria-hidden="true">
+      <div class="progress__track"><div class="progress__fill" id="fill"></div></div>
+      <span class="progress__label"><i></i>SCAN <span id="pct">0</span>%</span>
+    </footer>
+  </main>
+</div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="Enlarged image">
+  <button class="lb__x" id="lbX" aria-label="Close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M5 5l14 14M19 5L5 19"/></svg>
+  </button>
+  <figure><img id="lbImg" alt=""><figcaption id="lbCap"></figcaption></figure>
+</div>
+
+<!-- Portrait phones -->
+<div class="rotate">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>
+  <p>Rotate your phone</p>
+  <small>This presentation looks best in landscape.</small>
+  <button id="ignoreRotate">Continue anyway</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const slides = [...document.querySelectorAll('.slide')];
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+  const lb = document.getElementById('lb');
+  const lbImg = document.getElementById('lbImg');
+  const lbCap = document.getElementById('lbCap');
+  let i = 0;
+  let timers = [];
+  let nudgeTimer = 0;
+
+  /* ---------- Fit the 1280x720 canvas to the screen ---------- */
+  function fit() {
+    const k = Math.min(innerWidth / 1280, innerHeight / 720);
+    canvas.style.setProperty('--k', k);
+  }
+  addEventListener('resize', fit);
+  fit();
+
+  /* ---------- Images added later (phone1, phone2...): try common extensions ---------- */
+  document.querySelectorAll('.shot[data-src]').forEach(b => {
+    const img = b.querySelector('img');
+    const exts = ['png', 'jpg', 'jpeg', 'webp'];
+    let n = 0;
+    const tryNext = () => {
+      if (n >= exts.length) { b.classList.add('is-missing'); b.disabled = true; return; }
+      img.src = `${b.dataset.src}.${exts[n++]}`;
+    };
+    img.addEventListener('error', tryNext);
+    img.addEventListener('load', () => { b.dataset.full = img.src; });
+    tryNext();
+  });
+
+  /* ---------- Typing effects ---------- */
+  const TERM = [
+    ['$ ', 'k'], ['claude\n', ''],
+    ['> ', 'k'], ['Build a company website for SecureoT,\n  an IoT security company.\n\n', ''],
+    ['  ✓ logo        ', 'k'], ['secureot-logo.png\n', ''],
+    ['  ✓ palette     ', 'k'], ['#0F2A2A  #C5ED47\n', ''],
+    ['  ✓ graphics    ', 'k'], ['thin lines · scanner corners · grid\n', ''],
+    ['  ✓ motion      ', 'k'], ['live scanner hero · scroll reveals\n', ''],
+    ['  ✓ responsive  ', 'k'], ['desktop + mobile\n', ''],
+    ['  ✓ freedom     ', 'k'], ['"surprise me, keep it cyber"\n\n', ''],
+    ['● ', 'k'], ['Building SecureoT', ''], ['...', 'd']
+  ];
+  const typers = [...document.querySelectorAll('.typer')];
+  typers.forEach(t => { t.dataset.text = t.textContent.trim(); });
+
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+
+  function typeInto(el, text, speed) {
+    el.textContent = '';
+    const caret = document.createElement('span'); caret.className = 'caret';
+    el.after(caret);
+    let n = 0;
+    const step = () => {
+      n += 2;
+      el.textContent = text.slice(0, n);
+      if (n < text.length) timers.push(setTimeout(step, speed));
+    };
+    timers.push(setTimeout(step, 450));
+  }
+
+  function typeTerm(pre) {
+    pre.innerHTML = '';
+    let p = 0, c = 0, span = null;
+    const caret = document.createElement('span'); caret.className = 'caret'; caret.style.background = '#C5ED47';
+    const step = () => {
+      if (p >= TERM.length) { pre.appendChild(caret); return; }
+      const [txt, cls] = TERM[p];
+      if (!span) { span = document.createElement('span'); if (cls) span.className = cls; pre.appendChild(span); }
+      span.textContent = txt.slice(0, ++c);
+      pre.appendChild(caret);
+      if (c >= txt.length) { p++; c = 0; span = null; }
+      timers.push(setTimeout(step, txt[c - 1] === '\n' ? 160 : 18));
+    };
+    timers.push(setTimeout(step, 400));
+  }
+
+  function runEffects(slide) {
+    document.querySelectorAll('.caret').forEach(c => c.remove());
+    slide.querySelectorAll('.typer').forEach(t => typeInto(t, t.dataset.text, +t.dataset.speed || 20));
+    slide.querySelectorAll('.typer-term').forEach(typeTerm);
+  }
+
+  /* ---------- Hint on the next arrow after a few idle seconds ---------- */
+  function armNudge() {
+    clearTimeout(nudgeTimer);
+    next.classList.remove('is-nudging');
+    if (i < slides.length - 1) nudgeTimer = setTimeout(() => next.classList.add('is-nudging'), 7000);
+  }
+
+  /* ---------- Navigation ---------- */
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('tot').textContent = pad(slides.length);
+
+  function go(n) {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    i = n;
+    clearTimers();
+    slides.forEach((s, j) => {
+      s.classList.toggle('is-active', j === i);
+      s.classList.toggle('is-past', j < i);
+      s.inert = j !== i;
+    });
+    prev.disabled = i === 0;
+    next.disabled = i === slides.length - 1;
+    document.getElementById('cur').textContent = pad(i + 1);
+    const pct = Math.round(i / (slides.length - 1) * 100);
+    document.getElementById('pct').textContent = pct;
+    document.getElementById('fill').style.width = pct + '%';
+    history.replaceState(null, '', '#' + (i + 1));
+    runEffects(slides[i]);
+    armNudge();
+  }
+
+  prev.addEventListener('click', () => go(i - 1));
+  next.addEventListener('click', () => go(i + 1));
+  document.getElementById('restart').addEventListener('click', () => go(0));
+
+  addEventListener('keydown', e => {
+    if (lb.classList.contains('is-open')) { if (e.key === 'Escape') closeLb(); return; }
+    if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); go(i + 1); }
+    if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); go(i - 1); }
+    if (e.key === 'Home') go(0);
+    if (e.key === 'End') go(slides.length - 1);
+  });
+
+  let sx = 0, sy = 0;
+  addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  addEventListener('touchend', e => {
+    if (lb.classList.contains('is-open')) return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) go(i + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+
+  /* ---------- Lightbox ---------- */
+  let opener = null;
+  document.querySelectorAll('.shot').forEach(b => b.addEventListener('click', () => {
+    if (!b.dataset.full) return;
+    opener = b;
+    const img = b.querySelector('img');
+    lbImg.src = b.dataset.full;
+    lbImg.alt = img.alt;
+    const cap = b.querySelector('.cap');
+    lbCap.textContent = cap ? cap.innerText.replace(/\s+/g, ' ') : ''; // innerText keeps <br> as a space
+    lb.classList.add('is-open');
+    document.getElementById('lbX').focus();
+  }));
+  function closeLb() {
+    lb.classList.remove('is-open');
+    opener && opener.focus();
+  }
+  document.getElementById('lbX').addEventListener('click', closeLb);
+  lb.addEventListener('click', e => { if (e.target !== lbImg) closeLb(); });
+
+  /* ---------- Copy a color ---------- */
+  document.querySelectorAll('.swatch').forEach(s => s.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(s.dataset.hex); } catch (_) { /* clipboard blocked; still show the hint */ }
+    s.classList.add('did-copy');
+    setTimeout(() => s.classList.remove('did-copy'), 1400);
+  }));
+
+  document.getElementById('ignoreRotate').addEventListener('click', () => document.body.classList.add('ignore-rotate'));
+
+  const fromHash = () => {
+    const n = parseInt(location.hash.slice(1), 10);
+    go(Number.isFinite(n) ? n - 1 : 0);
+  };
+  addEventListener('hashchange', fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>
